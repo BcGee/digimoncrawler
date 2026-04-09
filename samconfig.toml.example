@@ -1,0 +1,10 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "digimoncrawler"
+resolve_s3 = true
+s3_prefix = "digimoncrawler"
+region = "ap-northeast-2"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Stage=prod DomainName=your-domain.example.com HostedZoneId=ZXXXXXXXXXXXXX CertificateArn=arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx CardBucketName=your-card-bucket"

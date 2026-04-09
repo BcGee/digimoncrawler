@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Digimon Card Crawler</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+h1 { text-align: center; margin-bottom: 24px; font-size: 1.8rem; color: #e94560; }
+.input-section { display: flex; gap: 10px; margin-bottom: 12px; }
+.input-section input { flex: 1; padding: 12px 16px; border: 2px solid #333; border-radius: 8px; background: #16213e; color: #eee; font-size: 14px; }
+.input-section input:focus { outline: none; border-color: #e94560; }
+.decklist-section { margin-bottom: 20px; }
+.decklist-section textarea { width: 100%; min-height: 120px; padding: 12px 16px; border: 2px solid #333; border-radius: 8px; background: #16213e; color: #eee; font-size: 13px; font-family: 'Courier New', monospace; resize: vertical; line-height: 1.6; }
+.decklist-section textarea:focus { outline: none; border-color: #e94560; }
+.decklist-section label { display: block; margin-bottom: 6px; font-size: 13px; color: #888; }
+.btn { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background 0.2s; }
+.btn-primary { background: #e94560; color: #fff; }
+.btn-primary:hover { background: #c73e54; }
+.btn-primary:disabled { background: #555; cursor: not-allowed; }
+.btn-print { background: #4ecca3; color: #1a1a2e; }
+.btn-print:hover { background: #3db890; }
+.btn-print:disabled { background: #555; color: #888; cursor: not-allowed; }
+.status { padding: 10px 16px; background: #16213e; border-radius: 8px; margin-bottom: 20px; font-size: 14px; display: none; }
+.status.show { display: block; }
+.status.error { border-left: 4px solid #e94560; }
+.status.success { border-left: 4px solid #4ecca3; }
+.status.loading { border-left: 4px solid #f0c040; }
+.deck-info { margin-bottom: 16px; font-size: 14px; color: #aaa; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 20px; }
+.card-item { position: relative; border-radius: 8px; overflow: hidden; background: #16213e; }
+.card-item img { width: 100%; display: block; border-radius: 8px; }
+.card-item .qty-badge { position: absolute; top: 4px; right: 4px; background: #e94560; color: #fff; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 12px; }
+.card-item .card-label { text-align: center; padding: 4px; font-size: 11px; color: #aaa; }
+.card-item .qty-control { display: flex; justify-content: center; align-items: center; gap: 6px; padding: 4px; }
+.card-item .qty-control button { width: 24px; height: 24px; border: 1px solid #444; border-radius: 4px; background: #16213e; color: #eee; cursor: pointer; font-size: 14px; line-height: 1; }
+.card-item .qty-control button:hover { background: #e94560; }
+.card-item .qty-control span { font-size: 13px; min-width: 16px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Digimon Card Crawler</h1>
+
+  <div class="input-section">
+    <input type="text" id="recipeUrl" placeholder="digimon-cg-guide.com recipe URL을 붙여넣으세요">
+    <button class="btn btn-primary" id="fetchBtn" onclick="fetchCards(false)">불러오기</button>
+    <button class="btn btn-primary" id="addBtn" onclick="fetchCards(true)" style="background:#0f3460;">추가하기</button>
+  </div>
+
+  <div class="decklist-section">
+    <label>덱 리스트 (직접 수정 가능 — "4xBT22-015" 또는 "4 BT22-015" 형식)</label>
+    <textarea id="decklistText" placeholder="4 BT14-001&#10;3 BT22-008&#10;4 BT22-017&#10;..." oninput="updateFetchBtnLabel()"></textarea>
+    <div style="margin-top:8px; display:flex; gap:10px; align-items:center;">
+      <button class="btn btn-print" onclick="downloadPdf(2,4)" disabled>2x4 다운로드</button>
+      <button class="btn btn-print" onclick="downloadPdf(3,3)" disabled>3x3 다운로드</button>
+      <div style="flex:1;"></div>
+      <button class="btn btn-primary" onclick="buildFromText()">만들기</button>
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <div class="deck-info" id="deckInfo"></div>
+  <div class="card-grid" id="cardGrid"></div>
+</div>
+
+<script>
+const API_BASE = '/api';
+let currentRecipe = '';
+let currentDeckName = '';
+let currentCards = [];
+let loadedImages = {};
+
+function setStatus(msg, type) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status show ' + type;
+}
+
+function parseRecipeFromUrl(url) {
+  try {
+    const u = new URL(url);
+    return {
+      recipe: u.searchParams.get('recipe') || '',
+      deckname: u.searchParams.get('deckname') || 'deck'
+    };
+  } catch {
+    return null;
+  }
+}
+
+function recipeToDecklist(recipeStr) {
+  return recipeStr.split('_').map(entry => {
+    const qty = entry.slice(-1);
+    const cardId = entry.slice(0, -1).toUpperCase();
+    return `${qty} ${cardId}`;
+  }).join('\n');
+}
+
+function decklistToRecipe(text) {
+  const lines = text.trim().split('\n').filter(l => l.trim());
+  return lines.map(line => {
+    const match = line.trim().match(/^(?:(\d+)\s*x?\s+)?([A-Za-z0-9-]+)/);
+    if (!match) return null;
+    const qty = match[1] || '1';
+    return `${match[2].toLowerCase()}${qty}`;
+  }).filter(Boolean).join('_');
+}
+
+function mergeDecklist(existing, added) {
+  const map = {};
+  const order = [];
+  [existing, added].forEach(text => {
+    if (!text) return;
+    text.split('\n').filter(l => l.trim()).forEach(line => {
+      const match = line.trim().match(/^(?:(\d+)\s*x?\s+)?([A-Za-z0-9-]+)/i);
+      if (!match) return;
+      const qty = parseInt(match[1] || '1');
+      const id = match[2].toUpperCase();
+      if (!(id in map)) order.push(id);
+      map[id] = (map[id] || 0) + qty;
+    });
+  });
+  return order.map(id => `${map[id]} ${id}`).join('\n');
+}
+
+function deduplicateDeck(deck) {
+  const map = {};
+  const order = [];
+  deck.forEach(d => {
+    if (!(d.card_id in map)) { map[d.card_id] = 0; order.push(d.card_id); }
+    map[d.card_id] += d.qty;
+  });
+  return order.map(id => ({ card_id: id, qty: map[id] }));
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    if (loadedImages[src]) { resolve(loadedImages[src]); return; }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => { loadedImages[src] = img; resolve(img); };
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function fetchCards(append) {
+  const url = document.getElementById('recipeUrl').value.trim();
+  if (!url) return;
+
+  const parsed = parseRecipeFromUrl(url);
+  if (!parsed || !parsed.recipe) {
+    setStatus('올바른 recipe URL을 입력해주세요.', 'error');
+    return;
+  }
+
+  const existing = document.getElementById('decklistText').value.trim();
+
+  if (!append && existing) {
+    if (!confirm('기존 덱 리스트가 비워집니다. 계속하시겠습니까?')) return;
+  }
+
+  currentDeckName = parsed.deckname;
+
+  if (append) {
+    const existing = document.getElementById('decklistText').value.trim();
+    const newLines = recipeToDecklist(parsed.recipe);
+    const merged = mergeDecklist(existing, newLines);
+    document.getElementById('decklistText').value = merged;
+    currentRecipe = decklistToRecipe(merged);
+    updateFetchBtnLabel();
+  } else {
+    currentRecipe = parsed.recipe;
+    document.getElementById('decklistText').value = recipeToDecklist(currentRecipe);
+    updateFetchBtnLabel();
+  }
+
+  const btn = document.getElementById('fetchBtn');
+  btn.disabled = true;
+  setStatus('카드 이미지를 불러오는 중...', 'loading');
+
+  try {
+    const resp = await fetch(`${API_BASE}/cards?recipe=${encodeURIComponent(currentRecipe)}`);
+    const data = await resp.json();
+    if (!resp.ok) { setStatus(data.error || '오류가 발생했습니다.', 'error'); return; }
+
+    currentCards = deduplicateDeck(data.deck);
+    renderCards(data.cards, currentCards);
+
+    await Promise.all(data.cards.map(c => loadImage(`/cards/${c.card_id}.png`)));
+
+    document.querySelectorAll('.btn-print').forEach(b => b.disabled = false);
+    setStatus(`${data.cards.length}종 카드 로드 완료!`, 'success');
+  } catch (e) {
+    setStatus('서버 연결 실패: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderCards(cards, deck) {
+  const grid = document.getElementById('cardGrid');
+  const info = document.getElementById('deckInfo');
+  const totalQty = deck.reduce((sum, d) => sum + d.qty, 0);
+  info.textContent = `${decodeURIComponent(currentDeckName)} — ${cards.length}종 / ${totalQty}장`;
+
+  const qtyMap = {};
+  deck.forEach(d => { qtyMap[d.card_id] = (qtyMap[d.card_id] || 0) + d.qty; });
+
+  grid.innerHTML = cards.map(c => `
+    <div class="card-item">
+      <img src="/cards/${c.card_id}.png" alt="${c.card_id}" loading="lazy">
+      <div class="card-label">${c.card_id}</div>
+      <div class="qty-control">
+        <button onclick="changeQty('${c.card_id}',-1)">-</button>
+        <span id="qty-${c.card_id}">${qtyMap[c.card_id] || 0}</span>
+        <button onclick="changeQty('${c.card_id}',1)">+</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function downloadPdf(cols, rows) {
+  if (!currentCards.length) {
+    setStatus('먼저 카드를 불러와주세요.', 'error');
+    return;
+  }
+
+  setStatus(`PDF 생성 중 (${cols}x${rows})...`, 'loading');
+
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const margin = 5;
+    const rotate = (cols === 2 && rows === 4);
+    const cardW = rotate ? 88 : 63;
+    const cardH = rotate ? 63 : 88;
+    const cardsPerPage = cols * rows;
+
+    const imageList = [];
+    for (const { card_id, qty } of currentCards) {
+      const src = `/cards/${card_id}.png`;
+      const img = loadedImages[src];
+      if (!img) continue;
+      for (let i = 0; i < qty; i++) imageList.push(img);
+    }
+
+    for (let p = 0; p < imageList.length; p += cardsPerPage) {
+      if (p > 0) doc.addPage();
+      const pageCards = imageList.slice(p, p + cardsPerPage);
+
+      for (let i = 0; i < pageCards.length; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = margin + col * cardW;
+        const y = margin + row * cardH;
+
+        const img = pageCards[i];
+        let dataUrl;
+
+        if (rotate) {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalHeight;
+          canvas.height = img.naturalWidth;
+          const ctx = canvas.getContext('2d');
+          ctx.translate(canvas.width, 0);
+          ctx.rotate(Math.PI / 2);
+          ctx.drawImage(img, 0, 0);
+          dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        } else {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        }
+
+        doc.addImage(dataUrl, 'JPEG', x, y, cardW, cardH);
+      }
+    }
+
+    doc.save(`${decodeURIComponent(currentDeckName || 'deck')}_${cols}x${rows}.pdf`);
+    setStatus('PDF 다운로드 완료!', 'success');
+  } catch (e) {
+    setStatus('PDF 생성 실패: ' + e.message, 'error');
+  }
+}
+
+async function buildFromText() {
+  const text = document.getElementById('decklistText').value.trim();
+  if (!text) { setStatus('덱 리스트를 입력해주세요.', 'error'); return; }
+
+  const recipe = decklistToRecipe(text);
+  if (!recipe) { setStatus('덱 리스트 형식이 올바르지 않습니다.', 'error'); return; }
+
+  currentRecipe = recipe;
+  setStatus('카드 이미지를 불러오는 중...', 'loading');
+
+  try {
+    const resp = await fetch(`${API_BASE}/cards?recipe=${encodeURIComponent(recipe)}`);
+    const data = await resp.json();
+    if (!resp.ok) { setStatus(data.error || '오류가 발생했습니다.', 'error'); return; }
+
+    currentCards = deduplicateDeck(data.deck);
+    renderCards(data.cards, currentCards);
+
+    await Promise.all(data.cards.map(c => loadImage(`/cards/${c.card_id}.png`)));
+
+    document.querySelectorAll('.btn-print').forEach(b => b.disabled = false);
+    setStatus(`${data.cards.length}종 카드 로드 완료!`, 'success');
+  } catch (e) {
+    setStatus('서버 연결 실패: ' + e.message, 'error');
+  }
+}
+
+document.getElementById('recipeUrl').addEventListener('keydown', e => {
+  if (e.key === 'Enter') fetchCards();
+});
+
+function changeQty(cardId, delta) {
+  const deck = currentCards;
+  const entry = deck.find(d => d.card_id === cardId);
+  if (!entry) return;
+
+  entry.qty = Math.max(0, entry.qty + delta);
+
+  document.getElementById(`qty-${cardId}`).textContent = entry.qty;
+
+  const lines = deck.filter(d => d.qty > 0).map(d => `${d.qty} ${d.card_id}`);
+  document.getElementById('decklistText').value = lines.join('\n');
+  updateFetchBtnLabel();
+
+  const totalQty = deck.reduce((sum, d) => sum + d.qty, 0);
+  const uniqueCount = deck.filter(d => d.qty > 0).length;
+  document.getElementById('deckInfo').textContent =
+    `${decodeURIComponent(currentDeckName)} — ${uniqueCount}종 / ${totalQty}장`;
+}
+
+function updateFetchBtnLabel() {
+  const hasText = document.getElementById('decklistText').value.trim().length > 0;
+  document.getElementById('fetchBtn').textContent = hasText ? '비우고 불러오기' : '불러오기';
+}
+</script>
+</body>
+</html>

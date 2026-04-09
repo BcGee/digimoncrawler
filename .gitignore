@@ -1,0 +1,20 @@
+# SAM build artifacts
+.aws-sam/
+
+# Downloaded card images
+digimon_cards/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Environment & secrets
+samconfig.toml
+.env
+
+# OS
+.DS_Store
+Thumbs.db
