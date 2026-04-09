@@ -224,15 +224,23 @@ function renderCards(cards, deck) {
     const displayId = selectedAlt || c.card_id;
     let altDropdown = '';
     if (alts.length > 0) {
-      const currentPMatch = c.card_id.match(/-P(\d+)$/);
-      const currentLabel = currentPMatch ? `P${currentPMatch[1]}` : '기본';
-      const options = [`<option value="">${currentLabel}</option>`]
-        .concat(alts.map(a => {
-          const pMatch = a.match(/-P(\d+)$/);
-          const label = pMatch ? `P${pMatch[1]}` : '기본';
-          const sel = selectedAlt === a ? ' selected' : '';
-          return `<option value="${a}"${sel}>${label}</option>`;
-        }));
+      // Build full ordered list: 기본, P1, P2, ...
+      const allVersions = [c.card_id, ...alts];
+      const baseId = c.card_id.replace(/-P\d+$/, '');
+      allVersions.sort((a, b) => {
+        if (a === baseId) return -1;
+        if (b === baseId) return 1;
+        const pa = (a.match(/-P(\d+)$/) || [, '0'])[1];
+        const pb = (b.match(/-P(\d+)$/) || [, '0'])[1];
+        return parseInt(pa) - parseInt(pb);
+      });
+      const selected = selectedAlts[c.card_id] || c.card_id;
+      const options = allVersions.map(v => {
+        const pMatch = v.match(/-P(\d+)$/);
+        const label = pMatch ? `P${pMatch[1]}` : '기본';
+        const sel = v === selected ? ' selected' : '';
+        return `<option value="${v}"${sel}>${label}</option>`;
+      });
       altDropdown = `<select class="alt-select" onchange="selectAlt('${c.card_id}', this.value)">${options.join('')}</select>`;
     }
     return `
@@ -375,11 +383,10 @@ function changeQty(cardId, delta) {
 }
 
 function selectAlt(cardId, altId) {
-  selectedAlts[cardId] = altId || null;
-  const displayId = altId || cardId;
+  selectedAlts[cardId] = altId;
   const imgEl = document.getElementById(`img-${cardId}`);
-  if (imgEl) imgEl.src = `/cards/${displayId}.png`;
-  loadImage(`/cards/${displayId}.png`);
+  if (imgEl) imgEl.src = `/cards/${altId}.png`;
+  loadImage(`/cards/${altId}.png`);
   const lines = currentCards.filter(d => d.qty > 0).map(d => {
     const dId = selectedAlts[d.card_id] || d.card_id;
     return `${d.qty} ${dId}`;
