@@ -77,9 +77,16 @@ def fetch_and_cache_card(card_id):
 
 def probe_alternates(card_id):
     """Probe for alternate art versions (P1, P2, ...) until failure."""
+    import re
+    # Extract base card ID if already an alternate (e.g. BT8-108-P1 → BT8-108)
+    m = re.match(r'^(.+)-P\d+$', card_id)
+    base_id = m.group(1) if m else card_id
+
     alternates = []
     for i in range(1, 10):
-        alt_id = f"{card_id}-P{i}"
+        alt_id = f"{base_id}-P{i}"
+        if alt_id == card_id:
+            continue
         if card_exists_in_s3(alt_id):
             alternates.append(alt_id)
             continue
@@ -95,6 +102,13 @@ def probe_alternates(card_id):
                 break
         except requests.RequestException:
             break
+
+    # If card itself is an alternate, include base as an option
+    if base_id != card_id:
+        if not card_exists_in_s3(base_id):
+            fetch_and_cache_card(base_id)
+        alternates = [base_id] + alternates
+
     return alternates
 
 

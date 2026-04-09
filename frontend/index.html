@@ -224,9 +224,10 @@ function renderCards(cards, deck) {
     const displayId = selectedAlt || c.card_id;
     let altDropdown = '';
     if (alts.length > 0) {
-      const options = [`<option value="">원본</option>`]
+      const options = [`<option value="">현재</option>`]
         .concat(alts.map(a => {
-          const label = a.split('-').pop();
+          const pMatch = a.match(/-P(\d+)$/);
+          const label = pMatch ? `P${pMatch[1]}` : '기본';
           const sel = selectedAlt === a ? ' selected' : '';
           return `<option value="${a}"${sel}>${label}</option>`;
         }));
