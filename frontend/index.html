@@ -224,7 +224,9 @@ function renderCards(cards, deck) {
     const displayId = selectedAlt || c.card_id;
     let altDropdown = '';
     if (alts.length > 0) {
-      const options = [`<option value="">기본</option>`]
+      const currentPMatch = c.card_id.match(/-P(\d+)$/);
+      const currentLabel = currentPMatch ? `P${currentPMatch[1]}` : '기본';
+      const options = [`<option value="">${currentLabel}</option>`]
         .concat(alts.map(a => {
           const pMatch = a.match(/-P(\d+)$/);
           const label = pMatch ? `P${pMatch[1]}` : '기본';
