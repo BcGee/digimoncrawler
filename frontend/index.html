@@ -39,6 +39,7 @@ h1 { text-align: center; margin-bottom: 24px; font-size: 1.8rem; color: #e94560;
 .card-item .qty-control button { width: 24px; height: 24px; border: 1px solid #444; border-radius: 4px; background: #16213e; color: #eee; cursor: pointer; font-size: 14px; line-height: 1; }
 .card-item .qty-control button:hover { background: #e94560; }
 .card-item .qty-control span { font-size: 13px; min-width: 16px; text-align: center; }
+.card-item .alt-select { display: block; width: calc(100% - 16px); margin: 0 8px 4px; padding: 4px; border: 1px solid #444; border-radius: 4px; background: #16213e; color: #eee; font-size: 11px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -74,6 +75,8 @@ let currentRecipe = '';
 let currentDeckName = '';
 let currentCards = [];
 let loadedImages = {};
+let selectedAlts = {};
+let cardAlternates = {};
 
 function setStatus(msg, type) {
   const el = document.getElementById('status');
@@ -190,9 +193,12 @@ async function fetchCards(append) {
     if (!resp.ok) { setStatus(data.error || '오류가 발생했습니다.', 'error'); return; }
 
     currentCards = deduplicateDeck(data.deck);
+    cardAlternates = {};
+    data.cards.forEach(c => { cardAlternates[c.card_id] = c.alternates || []; });
     renderCards(data.cards, currentCards);
 
     await Promise.all(data.cards.map(c => loadImage(`/cards/${c.card_id}.png`)));
+    await Promise.all(data.cards.flatMap(c => (c.alternates || []).map(alt => loadImage(`/cards/${alt}.png`))));
 
     document.querySelectorAll('.btn-print').forEach(b => b.disabled = false);
     setStatus(`${data.cards.length}종 카드 로드 완료!`, 'success');
@@ -212,17 +218,33 @@ function renderCards(cards, deck) {
   const qtyMap = {};
   deck.forEach(d => { qtyMap[d.card_id] = (qtyMap[d.card_id] || 0) + d.qty; });
 
-  grid.innerHTML = cards.map(c => `
+  grid.innerHTML = cards.map(c => {
+    const alts = c.alternates || [];
+    const selectedAlt = selectedAlts[c.card_id];
+    const displayId = selectedAlt || c.card_id;
+    let altDropdown = '';
+    if (alts.length > 0) {
+      const options = [`<option value="">원본</option>`]
+        .concat(alts.map(a => {
+          const label = a.split('-').pop();
+          const sel = selectedAlt === a ? ' selected' : '';
+          return `<option value="${a}"${sel}>${label}</option>`;
+        }));
+      altDropdown = `<select class="alt-select" onchange="selectAlt('${c.card_id}', this.value)">${options.join('')}</select>`;
+    }
+    return `
     <div class="card-item">
-      <img src="/cards/${c.card_id}.png" alt="${c.card_id}" loading="lazy">
+      <img src="/cards/${displayId}.png" alt="${c.card_id}" loading="lazy" id="img-${c.card_id}">
       <div class="card-label">${c.card_id}</div>
+      ${altDropdown}
       <div class="qty-control">
         <button onclick="changeQty('${c.card_id}',-1)">-</button>
         <span id="qty-${c.card_id}">${qtyMap[c.card_id] || 0}</span>
         <button onclick="changeQty('${c.card_id}',1)">+</button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function downloadPdf(cols, rows) {
@@ -244,7 +266,8 @@ async function downloadPdf(cols, rows) {
 
     const imageList = [];
     for (const { card_id, qty } of currentCards) {
-      const src = `/cards/${card_id}.png`;
+      const displayId = selectedAlts[card_id] || card_id;
+      const src = `/cards/${displayId}.png`;
       const img = loadedImages[src];
       if (!img) continue;
       for (let i = 0; i < qty; i++) imageList.push(img);
@@ -308,9 +331,12 @@ async function buildFromText() {
     if (!resp.ok) { setStatus(data.error || '오류가 발생했습니다.', 'error'); return; }
 
     currentCards = deduplicateDeck(data.deck);
+    cardAlternates = {};
+    data.cards.forEach(c => { cardAlternates[c.card_id] = c.alternates || []; });
     renderCards(data.cards, currentCards);
 
     await Promise.all(data.cards.map(c => loadImage(`/cards/${c.card_id}.png`)));
+    await Promise.all(data.cards.flatMap(c => (c.alternates || []).map(alt => loadImage(`/cards/${alt}.png`))));
 
     document.querySelectorAll('.btn-print').forEach(b => b.disabled = false);
     setStatus(`${data.cards.length}종 카드 로드 완료!`, 'success');
@@ -332,7 +358,10 @@ function changeQty(cardId, delta) {
 
   document.getElementById(`qty-${cardId}`).textContent = entry.qty;
 
-  const lines = deck.filter(d => d.qty > 0).map(d => `${d.qty} ${d.card_id}`);
+  const lines = deck.filter(d => d.qty > 0).map(d => {
+    const dId = selectedAlts[d.card_id] || d.card_id;
+    return `${d.qty} ${dId}`;
+  });
   document.getElementById('decklistText').value = lines.join('\n');
   updateFetchBtnLabel();
 
@@ -340,6 +369,19 @@ function changeQty(cardId, delta) {
   const uniqueCount = deck.filter(d => d.qty > 0).length;
   document.getElementById('deckInfo').textContent =
     `${decodeURIComponent(currentDeckName)} — ${uniqueCount}종 / ${totalQty}장`;
+}
+
+function selectAlt(cardId, altId) {
+  selectedAlts[cardId] = altId || null;
+  const displayId = altId || cardId;
+  const imgEl = document.getElementById(`img-${cardId}`);
+  if (imgEl) imgEl.src = `/cards/${displayId}.png`;
+  loadImage(`/cards/${displayId}.png`);
+  const lines = currentCards.filter(d => d.qty > 0).map(d => {
+    const dId = selectedAlts[d.card_id] || d.card_id;
+    return `${d.qty} ${dId}`;
+  });
+  document.getElementById('decklistText').value = lines.join('\n');
 }
 
 function updateFetchBtnLabel() {

@@ -75,6 +75,29 @@ def fetch_and_cache_card(card_id):
     return True
 
 
+def probe_alternates(card_id):
+    """Probe for alternate art versions (P1, P2, ...) until failure."""
+    alternates = []
+    for i in range(1, 10):
+        alt_id = f"{card_id}-P{i}"
+        if card_exists_in_s3(alt_id):
+            alternates.append(alt_id)
+            continue
+        url = f"{BASE_IMG_URL}/{alt_id}.png"
+        try:
+            resp = requests.head(url, headers=CRAWL_HEADERS, timeout=5)
+            if resp.status_code == 200:
+                if fetch_and_cache_card(alt_id):
+                    alternates.append(alt_id)
+                else:
+                    break
+            else:
+                break
+        except requests.RequestException:
+            break
+    return alternates
+
+
 def handle_cards(params):
     recipe_str = params.get("recipe", [""])[0]
     if not recipe_str:
@@ -87,7 +110,13 @@ def handle_cards(params):
         cached = card_exists_in_s3(card_id)
         if not cached:
             cached = fetch_and_cache_card(card_id)
-        return {"card_id": card_id, "cached": cached, "key": s3_key_for_card(card_id)}
+        alternates = probe_alternates(card_id)
+        return {
+            "card_id": card_id,
+            "cached": cached,
+            "key": s3_key_for_card(card_id),
+            "alternates": alternates,
+        }
 
     with ThreadPoolExecutor(max_workers=10) as pool:
         results = list(pool.map(process_card, unique_ids))

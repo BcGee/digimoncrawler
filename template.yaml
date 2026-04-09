@@ -4,7 +4,7 @@ Description: Digimon Card Crawler
 
 Globals:
   Function:
-    Timeout: 30
+    Timeout: 60
     MemorySize: 256
     Runtime: python3.12
 
@@ -160,3 +160,5 @@ Outputs:
     Value: !Sub https://${DomainName}
   DistributionId:
     Value: !Ref Distribution
+  FrontendBucketName:
+    Value: !Ref FrontendBucket
